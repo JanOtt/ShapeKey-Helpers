@@ -182,8 +182,7 @@ class ShapeKeyPreserver(bpy.types.Operator):
         newObject.name = oldName + "_Applied"
 
         for mod in newObject.modifiers:
-            if mod.type == 'SUBSURF' or mod.type == 'MIRROR' or mod.type == 'EDGE_SPLIT' or mod.type == 'BEVEL':
-                bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
+            bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
 
 
         for object in listOfShapeInstances:
