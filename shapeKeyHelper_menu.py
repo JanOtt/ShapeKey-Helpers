@@ -106,7 +106,11 @@ class ShapeKeySplitter(bpy.types.Operator):
     
 
 class ShapeKeyPreserver(bpy.types.Operator):
-    """Creates a new object with all suitable modifiers applied (Subdivision Surface, Mirror, Bevel and Edgesplit) and all shape keys preserved"""
+    """Creates a new object with all modifiers applied and all shape keys preserved"""
+    """NOTE: Blender can only combine objects with a matching number of vertices. """ 
+    """As a result, you need to make sure that your shape keys don't change the number of vertices of the mesh. """
+    """Modifiers like 'Subdivision Surface' can always be applied without any problems, other modifiers like 'Bevel' or 'Edgesplit' may not."""
+
     bl_idname = "object.shape_key_preserver"
     bl_label = "Apply Modifiers and Keep Shapekeys"
     
@@ -124,6 +128,7 @@ class ShapeKeyPreserver(bpy.types.Operator):
         originalObject.select = True
 
         listOfShapeInstances = []
+        listOfShapeKeyValues = []
 
         #_______________________________________________________________
 
@@ -133,7 +138,13 @@ class ShapeKeyPreserver(bpy.types.Operator):
                 originalObject.modifiers[mod.name].show_viewport = False
 
         index = 0
+        for shapekey in originalObject.data.shape_keys.key_blocks:
+            if(index == 0):
+                index = index + 1
+                continue
+            listOfShapeKeyValues.append(shapekey.value)
 
+        index = 0
         for shapekey in originalObject.data.shape_keys.key_blocks:
             
             if(index == 0):
@@ -184,17 +195,47 @@ class ShapeKeyPreserver(bpy.types.Operator):
         for mod in newObject.modifiers:
             bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
 
-
+        errorDuringShapeJoining = False
+            
         for object in listOfShapeInstances:
             
             bpy.ops.object.select_all(action='DESELECT')
             newObject.select = True
             object.select = True
             bpy.context.scene.objects.active = newObject
-            bpy.ops.object.join_shapes()
+            
+            print("Trying to join shapes.")
+            
+            result = bpy.ops.object.join_shapes()
+            
+            if(result != {'FINISHED'}):
+                print ("Could not add " + object.name + " as shape key.")
+                errorDuringShapeJoining = True
+
+        if(errorDuringShapeJoining == False):
+            print("Success!")
+                
+        if(errorDuringShapeJoining == False):
+            #Reset old shape key values on new object
+            index = 0
+            for shapekey in newObject.data.shape_keys.key_blocks:
+                if(index == 0):
+                    index = index + 1
+                    continue
+                shapekey.value = listOfShapeKeyValues[index-1]
+                index = index + 1
+
+        #Reset old shape key values on original object
+        index = 0
+        for shapekey in originalObject.data.shape_keys.key_blocks:
+            if(index == 0):
+                index = index + 1
+                continue
+            shapekey.value = listOfShapeKeyValues[index-1]
+            index = index + 1
             
             
-        #Select and delete all temporal shapekey object       
+        #Select and delete all temporal shapekey objects       
         bpy.ops.object.select_all(action='DESELECT')
 
         for object in listOfShapeInstances:
