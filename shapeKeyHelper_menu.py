@@ -1,16 +1,17 @@
 bl_info = {
     "name": "ShapeKey Helpers",
     "author": "Ott, Jan",
-    "version": (1, 0, 0),
-    "blender": (2, 76, 0),
+    "version": (1, 1, 0),
+    "blender": (2, 80, 0),
     "description": "Adds three operators: 'Split Shapekeys', 'Apply Modifiers and Keep Shapekeys' and 'Apply Selected Shapekey as Basis'",
     "warning": "",
-    "wiki_url": "",
-    "category": "",
+    "wiki_url": "https://blenderartists.org/t/addon-shapekey-helpers/1131849",
+    "category": "'Mesh",
 }
 
-
 import bpy
+from inspect import currentframe, getframeinfo
+
 
 #__________________________________________________________________________
 #__________________________________________________________________________
@@ -32,8 +33,7 @@ class ShapeKeySplitter(bpy.types.Operator):
     def execute(self, context):
         
         O.object.select_all(action='DESELECT')
-        bpy.context.object.select = True
-
+        bpy.context.active_object.select_set(True)
         #____________________________
         #Generate copy of object
         #____________________________
@@ -125,7 +125,7 @@ class ShapeKeyPreserver(bpy.types.Operator):
         #selection setup
         originalObject = bpy.context.active_object
 
-        originalObject.select = True
+        originalObject.select_set(True)
 
         listOfShapeInstances = []
         listOfShapeKeyValues = []
@@ -152,8 +152,9 @@ class ShapeKeyPreserver(bpy.types.Operator):
                 continue
             
             bpy.ops.object.select_all(action='DESELECT')
-            originalObject.select = True
-            bpy.context.scene.objects.active = originalObject
+            originalObject.select_set(True)
+
+            bpy.context.view_layer.objects.active = originalObject
             
             bpy.ops.object.shape_key_clear()
             
@@ -174,14 +175,15 @@ class ShapeKeyPreserver(bpy.types.Operator):
             bpy.context.object.name = shapekeyname
             
             bpy.ops.object.select_all(action='DESELECT')
-            originalObject.select = True
-            bpy.context.scene.objects.active = originalObject
+            originalObject.select_set(True)
+
+            bpy.context.view_layer.objects.active = originalObject
 
         #_____________________________________________________________
         #Prepare final empty container model for all those shape keys:
         #_____________________________________________________________
-
-        bpy.context.scene.objects.active = originalObject
+        
+        bpy.context.view_layer.objects.active = originalObject
         bpy.ops.object.shape_key_clear()
 
         bpy.ops.object.duplicate(linked=False, mode='TRANSLATION')
@@ -193,6 +195,10 @@ class ShapeKeyPreserver(bpy.types.Operator):
         newObject.name = oldName + "_Applied"
 
         for mod in newObject.modifiers:
+
+            # Not actually sure why this is necessary, but blender crashes without it. :| - Stel
+            bpy.ops.object.mode_set(mode = 'EDIT')            
+            bpy.ops.object.mode_set(mode = 'OBJECT')            
             bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
 
         errorDuringShapeJoining = False
@@ -200,9 +206,11 @@ class ShapeKeyPreserver(bpy.types.Operator):
         for object in listOfShapeInstances:
             
             bpy.ops.object.select_all(action='DESELECT')
-            newObject.select = True
-            object.select = True
-            bpy.context.scene.objects.active = newObject
+            newObject.select_set(True)
+            object.select_set(True)
+
+            bpy.context.view_layer.objects.active = newObject
+      
             
             print("Trying to join shapes.")
             
@@ -239,7 +247,7 @@ class ShapeKeyPreserver(bpy.types.Operator):
         bpy.ops.object.select_all(action='DESELECT')
 
         for object in listOfShapeInstances:
-            object.select = True
+            object.select_set(True)
             
         bpy.ops.object.delete(use_global=False)
         
@@ -268,7 +276,7 @@ class ShapeKeyApplier(bpy.types.Operator):
     def execute(self, context):
         
         O.object.select_all(action='DESELECT')
-        bpy.context.object.select = True
+        bpy.context.object.select_set(True)
 
         #____________________________
         #Generate copy of object
@@ -334,28 +342,53 @@ class ShapeKeyApplier(bpy.types.Operator):
 
 
 
-def shapeKeyHelpers_menu_func(self, context):
-    self.layout.separator()
-    self.layout.operator(ShapeKeySplitter.bl_idname, text="Split Shapekeys", icon="FULLSCREEN_ENTER")
-    self.layout.operator(ShapeKeyPreserver.bl_idname, text="Apply Modifiers and Keep Shapekeys", icon="MODIFIER")
-    self.layout.operator(ShapeKeyApplier.bl_idname, text="Apply Selected Shapekey as Basis", icon="KEY_HLT")
+# I'm honestly not sure how to add this to an existing menu in 2.8, so rather than go
+# down a rabbit-hole of research, I'm just adding a panel, because it works and is
+# quick to do. Someone should probably look at this and do better than I have.
+class PT_shapeKeyHelpers(bpy.types.Panel):
+    """Creates a Panel in the Object properties window"""
+    bl_label = "Shapekey tools"
+    bl_idname = "SHAPEHELPER_PT_uipanel"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "data"
 
+
+    @classmethod
+    def poll(cls, context):
+        return True
+        return bpy.context.active_object == 'MESH'
+
+
+    def draw(self, context):
+        self.layout.separator()
+        self.layout.operator(ShapeKeySplitter.bl_idname, text="Split Shapekeys", icon="FULLSCREEN_ENTER")
+        self.layout.operator(ShapeKeyPreserver.bl_idname, text="Apply Modifiers and Keep Shapekeys", icon="MODIFIER")
+        self.layout.operator(ShapeKeyApplier.bl_idname, text="Apply Selected Shapekey as Basis", icon="KEY_HLT")
+
+
+classes = (
+    ShapeKeySplitter,
+    ShapeKeyPreserver,
+    ShapeKeyApplier,
+    PT_shapeKeyHelpers
+
+)
+    
 
 def register():
-    bpy.utils.register_class(ShapeKeySplitter)
-    bpy.utils.register_class(ShapeKeyPreserver)
-    bpy.utils.register_class(ShapeKeyApplier)
-    bpy.types.MESH_MT_shape_key_specials.append(shapeKeyHelpers_menu_func)
-
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)
 
 def unregister():
-    bpy.utils.unregister_class(ShapeKeySplitter)
-    bpy.utils.unregister_class(ShapeKeyPreserver)
-    bpy.utils.unregister_class(ShapeKeyApplier)
-    bpy.types.MESH_MT_shape_key_specials.remove(shapeKeyHelpers_menu_func)
+    from bpy.utils import unregister_class
+    for cls in reversed(classes):
+        unregister_class(cls)
+
+
 
 if __name__ == "__main__":
     register()
     
-    
-
+   
