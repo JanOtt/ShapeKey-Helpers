@@ -357,7 +357,6 @@ class PT_shapeKeyHelpers(bpy.types.Panel):
     
     @classmethod
     def poll(cls, context):
-        #return True
         return bpy.context.active_object.type == 'MESH'
 
     
