@@ -354,12 +354,12 @@ class PT_shapeKeyHelpers(bpy.types.Panel):
     bl_context = "data"
 
 
+    
     @classmethod
     def poll(cls, context):
-        return True
-        return bpy.context.active_object == 'MESH'
+        return bpy.context.active_object.type == 'MESH'
 
-
+    
     def draw(self, context):
         self.layout.separator()
         self.layout.operator(ShapeKeySplitter.bl_idname, text="Split Shapekeys", icon="FULLSCREEN_ENTER")
