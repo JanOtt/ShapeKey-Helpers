@@ -195,11 +195,11 @@ class ShapeKeyPreserver(bpy.types.Operator):
         newObject.name = oldName + "_Applied"
 
         for mod in newObject.modifiers:
-
             # Not actually sure why this is necessary, but blender crashes without it. :| - Stel
             bpy.ops.object.mode_set(mode = 'EDIT')            
             bpy.ops.object.mode_set(mode = 'OBJECT')            
-            bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
+            if mod.type != 'ARMATURE':
+                bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
 
         errorDuringShapeJoining = False
             
