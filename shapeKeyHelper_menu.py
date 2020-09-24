@@ -199,7 +199,10 @@ class ShapeKeyPreserver(bpy.types.Operator):
             bpy.ops.object.mode_set(mode = 'EDIT')            
             bpy.ops.object.mode_set(mode = 'OBJECT')            
             if mod.type != 'ARMATURE':
-                bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
+                if (2, 90, 0) > bpy.app.version:
+                    bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
+                else:
+                    bpy.ops.object.modifier_apply(modifier=mod.name)
 
         errorDuringShapeJoining = False
             
