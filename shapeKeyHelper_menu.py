@@ -1,7 +1,7 @@
 bl_info = {
     "name": "ShapeKey Helpers",
-    "author": "Ott, Jan",
-    "version": (1, 1, 0),
+    "author": "Ott, Jan, Tyler Walker (BeyondDev)",
+    "version": (1, 2, 0),
     "blender": (2, 80, 0),
     "description": "Adds three operators: 'Split Shapekeys', 'Apply Modifiers and Keep Shapekeys' and 'Apply Selected Shapekey as Basis'",
     "warning": "",
@@ -103,18 +103,79 @@ class ShapeKeySplitter(bpy.types.Operator):
                 
                 
         return {'FINISHED'}
-    
+
+
+# Beyond Dev
+def driver_settings_copy(copy_drv, tar_drv):
+    scn_prop = bpy.context.scene.skmp_props
+
+    tar_drv.driver.type = copy_drv.driver.type
+    tar_drv.driver.use_self = copy_drv.driver.use_self
+
+    for var in copy_drv.driver.variables:
+        new_var = tar_drv.driver.variables.new()
+        new_var.name = var.name
+        new_var.type = var.type
+
+        count = 0
+        for tar in var.targets:
+            new_var.targets[count].bone_target = tar.bone_target
+            new_var.targets[count].data_path = tar.data_path
+
+            if scn_prop.rename_driver_bones:
+                new_var.targets[count].bone_target = tar.bone_target.replace(
+                    scn_prop.text_filter, scn_prop.text_rename)
+                new_var.targets[count].data_path = tar.data_path.replace(
+                    scn_prop.text_filter, scn_prop.text_rename)
+
+            new_var.targets[count].id = tar.id
+            new_var.targets[count].transform_space = tar.transform_space
+            new_var.targets[count].transform_type = tar.transform_type
+
+            count += 1
+
+    tar_drv.driver.expression = copy_drv.driver.expression
+    print('copied driver settings...!')
+    return
+
+# Beyond Dev
+def copy_drivers(copy_ob, tar_ob, copy_key, tar_key):
+    copy_sk = copy_ob.data.shape_keys
+    copy_drivers = copy_sk.animation_data.drivers
+
+    if tar_ob.data.animation_data == None:
+        tar_ob.data.animation_data_create()
+    tar_sk = tar_ob.data.shape_keys
+
+    for drv in copy_drivers:
+        drv_name = drv.data_path.replace('key_blocks["', '')
+        drv_name = drv_name.replace('"].value', '')
+
+        if copy_key.name == drv_name:
+            # new_driver = tar_sk.key_blocks[len(
+            #     tar_sk.key_blocks)-1].driver_add('value', -1)
+            new_driver = tar_sk.key_blocks[tar_key.name].driver_add('value', -1)
+            print('executing copy...')
+            driver_settings_copy(drv, new_driver)
+
 
 class ShapeKeyPreserver(bpy.types.Operator):
-    """Creates a new object with all modifiers applied and all shape keys preserved"""
+    """Creates a new object with all modifiers applied and all shape keys + DRIVERS preserved"""
     """NOTE: Blender can only combine objects with a matching number of vertices. """ 
     """As a result, you need to make sure that your shape keys don't change the number of vertices of the mesh. """
     """Modifiers like 'Subdivision Surface' can always be applied without any problems, other modifiers like 'Bevel' or 'Edgesplit' may not."""
 
     bl_idname = "object.shape_key_preserver"
-    bl_label = "Apply Modifiers and Keep Shapekeys"
+    bl_label = "Apply Modifiers and Keep Shapekeys+Drivers"
+    
+    @classmethod 
+    def poll(cls, context):
+        global updatedObject
+        updatedObject = bpy.context.active_object
+        return updatedObject and updatedObject.type == 'MESH'
     
     def execute(self, context):
+        global updatedObject
     
         oldName = bpy.context.active_object.name
         
@@ -122,8 +183,32 @@ class ShapeKeyPreserver(bpy.types.Operator):
         oldContext = bpy.context.area.type
         bpy.context.area.type = 'VIEW_3D'
 
-        #selection setup
+        #selection setup, preserve drivers on this object
+        driverObject = bpy.context.active_object
+
+        #copy of driverObject to transfer everything from
+        bpy.ops.object.duplicate(
+            {"object" : driverObject,
+            "selected_objects" : [driverObject]},
+            linked = False
+        )
+        #store reference to copy of driver object
         originalObject = bpy.context.active_object
+
+        #delete all drivers on this new object to allow proper shapekey transfer. Shapekeys cannot be modified while drivers exist on them.
+        for shapekey in originalObject.data.shape_keys.key_blocks:
+            # for driver in shapekey.id_data.animation_data.drivers:
+            #     shapekey.driver_remove(driver.data_path)
+
+            try:
+                shapekey_name = shapekey.name
+                shapekeys = originalObject.data.shape_keys
+                drivers = shapekeys.animation_data.drivers
+                dr = drivers.find(f'key_blocks["{shapekey_name}"].value')
+                if dr is not None:
+                    drivers.remove(dr)
+            except:
+                pass
 
         originalObject.select_set(True)
 
@@ -131,6 +216,7 @@ class ShapeKeyPreserver(bpy.types.Operator):
         listOfShapeKeyValues = []
 
         #_______________________________________________________________
+
 
         #Deactivate any armature modifiers
         for mod in originalObject.modifiers:
@@ -152,8 +238,8 @@ class ShapeKeyPreserver(bpy.types.Operator):
                 continue
             
             bpy.ops.object.select_all(action='DESELECT')
+            
             originalObject.select_set(True)
-
             bpy.context.view_layer.objects.active = originalObject
             
             bpy.ops.object.shape_key_clear()
@@ -192,8 +278,6 @@ class ShapeKeyPreserver(bpy.types.Operator):
         bpy.ops.object.shape_key_clear()
         bpy.ops.object.shape_key_remove(all=True)
 
-        newObject.name = oldName + "_Applied"
-
         for mod in newObject.modifiers:
             # Not actually sure why this is necessary, but blender crashes without it. :| - Stel
             bpy.ops.object.mode_set(mode = 'EDIT')            
@@ -203,7 +287,7 @@ class ShapeKeyPreserver(bpy.types.Operator):
                     bpy.ops.object.modifier_apply(apply_as='DATA', modifier=mod.name)
                 else:
                     bpy.ops.object.modifier_apply(modifier=mod.name)
-
+        
         errorDuringShapeJoining = False
             
         for object in listOfShapeInstances:
@@ -228,13 +312,21 @@ class ShapeKeyPreserver(bpy.types.Operator):
                 
         if(errorDuringShapeJoining == False):
             #Reset old shape key values on new object
+
+            driverObject.select_set(True)
+            newObject.select_set(True)
+            bpy.context.view_layer.objects.active = newObject
+
             index = 0
-            for shapekey in newObject.data.shape_keys.key_blocks:
+            for shapekey, driverShapekey in zip(newObject.data.shape_keys.key_blocks, driverObject.data.shape_keys.key_blocks):                
                 if(index == 0):
                     index = index + 1
                     continue
                 shapekey.value = listOfShapeKeyValues[index-1]
                 index = index + 1
+                #BEYOND DEV: Copy Drivers from old object to new object
+                if driverShapekey.has_driver():
+                    copy_drivers(driverObject, newObject, driverShapekey, shapekey)
 
         #Reset old shape key values on original object
         index = 0
@@ -253,7 +345,13 @@ class ShapeKeyPreserver(bpy.types.Operator):
             object.select_set(True)
             
         bpy.ops.object.delete(use_global=False)
-        
+
+        #delete all drivers on new object that did not exist on original object
+        for shapekey in newObject.data.shape_keys.key_blocks:
+            # if shapekey name doesn't exist in original object, delete it
+            if shapekey.name not in newObject.data.shape_keys.key_blocks:
+                newObject.shape_key_remove(shapekey.name)
+
         
         #Reactivate armature modifiers on old and new object
     
@@ -264,8 +362,21 @@ class ShapeKeyPreserver(bpy.types.Operator):
         for mod in newObject.modifiers:
             if mod.type == 'ARMATURE':
                 newObject.modifiers[mod.name].show_viewport = True
+
+        
+        # Delete the copy object
+        bpy.data.objects.remove(originalObject)
+
+        # Hide driver backup object
+        driverObject.hide = True
+
+        newObject.name = oldName + "_Applied"
+
                 
         bpy.context.area.type = oldContext
+
+        #Beyond Dev - For other scripts to check identify the new object
+        self.updatedObject = newObject
         
         return {'FINISHED'}
     
@@ -344,7 +455,7 @@ class ShapeKeyApplier(bpy.types.Operator):
 
 
 
-
+# Ott / Jan :
 # I'm honestly not sure how to add this to an existing menu in 2.8, so rather than go
 # down a rabbit-hole of research, I'm just adding a panel, because it works and is
 # quick to do. Someone should probably look at this and do better than I have.
@@ -366,8 +477,8 @@ class PT_shapeKeyHelpers(bpy.types.Panel):
     def draw(self, context):
         self.layout.separator()
         self.layout.operator(ShapeKeySplitter.bl_idname, text="Split Shapekeys", icon="FULLSCREEN_ENTER")
-        self.layout.operator(ShapeKeyPreserver.bl_idname, text="Apply Modifiers and Keep Shapekeys", icon="MODIFIER")
-        self.layout.operator(ShapeKeyApplier.bl_idname, text="Apply Selected Shapekey as Basis", icon="KEY_HLT")
+        self.layout.operator(ShapeKeyPreserver.bl_idname, text="Apply Modifiers and Keep Shapekeys", icon="MODIFIER") # TODO: Use this to Apply Rig Modifier to Avatar
+        self.layout.operator(ShapeKeyApplier.bl_idname, text="Apply Selected Shapekey as Basis", icon="KEY_HLT") # TODO: Can use this for Applying Body Type in Avatar Generator
 
 
 classes = (
